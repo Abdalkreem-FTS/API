@@ -1,0 +1,49 @@
+@API_HostAddress = http://localhost:5244
+
+### 1. Public endpoint. Works with no token.
+GET {{API_HostAddress}}/
+
+### 2. The protected endpoint WITHOUT a token. Expect 401 Unauthorized.
+GET {{API_HostAddress}}/weatherforecast
+
+### 3. Log in. Saves the token for the requests below.
+# @name login
+POST {{API_HostAddress}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "Password123!"
+}
+
+###
+@token = {{login.response.body.accessToken}}
+
+### 4. The same endpoint WITH the token. Expect 200 and the forecast.
+GET {{API_HostAddress}}/weatherforecast
+Authorization: Bearer {{token}}
+
+### 5. Wrong password. Expect 401.
+POST {{API_HostAddress}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "wrong-password"
+}
+
+### 6. ValidateToken on a real token. Expect isValid true.
+POST {{API_HostAddress}}/auth/validate
+Content-Type: application/json
+
+{
+  "token": "{{token}}"
+}
+
+### 7. ValidateToken on rubbish. Expect isValid false with a reason.
+POST {{API_HostAddress}}/auth/validate
+Content-Type: application/json
+
+{
+  "token": "not-a-real-token"
+}
