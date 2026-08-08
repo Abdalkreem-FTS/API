@@ -1,18 +1,33 @@
 using System.Security.Claims;
-using API;
+using API.Authentication;
+using API.Contracts;
+using API.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 
-var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? throw new InvalidOperationException("The 'Jwt' section is missing from configuration.");
+builder.Services
+    .AddOptions<JwtOptions>()
+    .Bind(builder.Configuration.GetSection(JwtOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
-builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddSingleton<JwtTokenGenerator>();
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options => options.TokenValidationParameters = JwtTokenGenerator.CreateValidationParameters(jwtOptions));
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer();
+
+builder.Services
+    .AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<IOptionsMonitor<JwtOptions>>((bearer, jwt) =>
+    {
+        bearer.TokenValidationParameters = JwtTokenGenerator.CreateValidationParameters(jwt.CurrentValue);
+        bearer.Events = JwtBearerEventHandlers.Create();
+    });
 
 builder.Services.AddAuthorization();
 
@@ -26,42 +41,33 @@ if (app.Environment.IsDevelopment())
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
-// Public endpoints
+var api = app.MapGroup("/api");
 
-app.MapGet("/", () => new
-{
-    message = "Minimal ASP.NET Web API with JWT authentication.",
-    howToStart = "POST /auth/login with {\"username\":\"alice\",\"password\":\"Password123!\"}, "
-                 + "then call /weatherforecast with 'Authorization: Bearer <accessToken>'.",
-});
-
-app.MapPost("/auth/login", (LoginRequest request, JwtTokenGenerator tokens) =>
+api.MapPost("/tokens", (LoginRequest request, JwtTokenGenerator tokens) =>
 {
     var user = Users.Find(request.Username, request.Password);
-    
-    return user is null ? Results.Unauthorized() : Results.Ok(tokens.GenerateToken(user.Username));
+
+    return user is null
+        ? Results.Unauthorized()
+        : Results.Ok(tokens.GenerateToken(user));
 });
-
-app.MapPost("/auth/validate", (ValidateRequest request, JwtTokenGenerator tokens) => tokens.ValidateToken(request.Token));
-
-
-// Protected endpoint
 
 var summaries = new[]
 {
     "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching",
 };
 
-app.MapGet("/weatherforecast", (ClaimsPrincipal user) => new
+api.MapGet("/weatherforecast", (ClaimsPrincipal user) => new
 {
-    message = $"Hello {user.FindFirstValue("name")}, you are authorized.",
+    message = $"Hello {user.Identity?.Name}, you are authorized.",
     forecast = Enumerable.Range(1, 5).Select(day => new WeatherForecast
     (
         Date: DateOnly.FromDateTime(DateTime.Now.AddDays(day)),
         TemperatureC: Random.Shared.Next(-20, 55),
         Summary: summaries[Random.Shared.Next(summaries.Length)]
-    ))
+    )),
 }).RequireAuthorization();
 
 app.Run();
