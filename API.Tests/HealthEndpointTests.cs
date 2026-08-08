@@ -1,9 +1,8 @@
 using System.Net;
-using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace API.Tests;
 
-public class HealthEndpointTests(WebApplicationFactory<Program> factory) : ControllerTestsBase(factory)
+public class HealthEndpointTests(TestApiFactory factory) : ControllerTestsBase(factory)
 {
     [Fact]
     public async Task Get_DoesNotRequireAuthentication()

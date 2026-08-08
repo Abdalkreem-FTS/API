@@ -2,18 +2,17 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using API.Authentication;
 using API.Contracts;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace API.Tests;
 
-public abstract class ControllerTestsBase(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public abstract class ControllerTestsBase(TestApiFactory factory) : IClassFixture<TestApiFactory>
 {
     protected const string Username = "alice";
     protected const string Password = "Password123!";
 
-    private WebApplicationFactory<Program> Factory { get; } = factory;
+    private TestApiFactory Factory { get; } = factory;
 
     protected HttpClient Client { get; } = factory.CreateClient();
 

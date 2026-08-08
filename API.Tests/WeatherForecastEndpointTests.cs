@@ -4,13 +4,12 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
 namespace API.Tests;
 
-public class WeatherForecastEndpointTests(WebApplicationFactory<Program> factory) : ControllerTestsBase(factory)
+public class WeatherForecastEndpointTests(TestApiFactory factory) : ControllerTestsBase(factory)
 {
     [Fact]
     public async Task Get_WithoutAToken_Returns401()

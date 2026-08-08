@@ -1,12 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using API.Contracts;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace API.Tests;
 
-public class TokenEndpointTests(WebApplicationFactory<Program> factory) : ControllerTestsBase(factory)
+public class TokenEndpointTests(TestApiFactory factory) : ControllerTestsBase(factory)
 {
     [Fact]
     public async Task Post_WithCorrectCredentials_ReturnsAToken()
