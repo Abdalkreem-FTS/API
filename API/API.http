@@ -1,14 +1,14 @@
 @API_HostAddress = http://localhost:5244
 
-### 1. Public endpoint. Works with no token.
-GET {{API_HostAddress}}/
+### 1. Liveness check. Anonymous.
+GET {{API_HostAddress}}/health
 
-### 2. The protected endpoint WITHOUT a token. Expect 401 Unauthorized.
-GET {{API_HostAddress}}/weatherforecast
+### 2. The protected endpoint WITHOUT a token. Expect 401 and a problem+json body.
+GET {{API_HostAddress}}/api/weatherforecast
 
-### 3. Log in. Saves the token for the requests below.
-# @name login
-POST {{API_HostAddress}}/auth/login
+### 3. Create a token. Saves it for the requests below.
+# @name createToken
+POST {{API_HostAddress}}/api/tokens
 Content-Type: application/json
 
 {
@@ -17,14 +17,14 @@ Content-Type: application/json
 }
 
 ###
-@token = {{login.response.body.accessToken}}
+@token = {{createToken.response.body.accessToken}}
 
 ### 4. The same endpoint WITH the token. Expect 200 and the forecast.
-GET {{API_HostAddress}}/weatherforecast
+GET {{API_HostAddress}}/api/weatherforecast
 Authorization: Bearer {{token}}
 
 ### 5. Wrong password. Expect 401.
-POST {{API_HostAddress}}/auth/login
+POST {{API_HostAddress}}/api/tokens
 Content-Type: application/json
 
 {
@@ -32,18 +32,14 @@ Content-Type: application/json
   "password": "wrong-password"
 }
 
-### 6. ValidateToken on a real token. Expect isValid true.
-POST {{API_HostAddress}}/auth/validate
-Content-Type: application/json
+### 6. Rubbish in the header. Expect 401 with a problem+json body.
+GET {{API_HostAddress}}/api/weatherforecast
+Authorization: Bearer not-a-real-token
 
-{
-  "token": "{{token}}"
-}
+### 7. Log out. Revokes the token above. Expect 204.
+DELETE {{API_HostAddress}}/api/tokens
+Authorization: Bearer {{token}}
 
-### 7. ValidateToken on rubbish. Expect isValid false with a reason.
-POST {{API_HostAddress}}/auth/validate
-Content-Type: application/json
-
-{
-  "token": "not-a-real-token"
-}
+### 8. The same token again. Still signed, still unexpired, now revoked. Expect 401.
+GET {{API_HostAddress}}/api/weatherforecast
+Authorization: Bearer {{token}}
