@@ -1,81 +1,81 @@
-using System.IdentityModel.Tokens.Jwt;
+using API.Authentication;
+using API.Models;
+using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace API.Tests;
 
 public class JwtTokenGeneratorTests
 {
     private const string Key = "test-signing-key-that-is-long-enough-for-hs256";
-    private const string OtherKey = "a-completely-different-key-also-long-enough!!";
+
+    private static readonly User Alice = new(
+        Guid.Parse("8f14e45f-ceea-467a-9575-2c1a1a4a2d1b"),
+        "alice",
+        "Password123!",
+        ["admin", "user"]);
 
     [Fact]
-    public void ValidateToken_AcceptsATokenWeJustCreated()
+    public void GenerateToken_WritesTheRegisteredClaims()
+    {
+        var jwt = new JsonWebToken(Create().GenerateToken(Alice).AccessToken);
+
+        Assert.Equal(Alice.Id.ToString(), jwt.Subject);
+        Assert.NotEmpty(jwt.Id);
+        Assert.Equal(Alice.Username, jwt.GetClaim(JwtRegisteredClaimNames.Name).Value);
+        Assert.Equal("test-issuer", jwt.Issuer);
+        Assert.Contains("test-audience", jwt.Audiences);
+    }
+
+    [Fact]
+    public void GenerateToken_WritesEveryRole()
+    {
+        var jwt = new JsonWebToken(Create().GenerateToken(Alice).AccessToken);
+
+        var roles = jwt.Claims
+            .Where(claim => claim.Type == JwtTokenGenerator.RoleClaimType)
+            .Select(claim => claim.Value);
+
+        Assert.Equal(["admin", "user"], roles);
+    }
+
+    [Fact]
+    public void GenerateToken_WritesIssuedAtAndExpiry()
+    {
+        var token = Create(expiryMinutes: 30).GenerateToken(Alice);
+        var jwt = new JsonWebToken(token.AccessToken);
+
+        Assert.True(jwt.IssuedAt > DateTime.UtcNow.AddMinutes(-1));
+        Assert.True((token.ExpiresAt - jwt.ValidTo).Duration() < TimeSpan.FromSeconds(2));
+        Assert.True(token.ExpiresAt > DateTime.UtcNow.AddMinutes(29));
+    }
+
+    [Fact]
+    public void GenerateToken_GivesEachTokenItsOwnJti()
     {
         var generator = Create();
 
-        var token = generator.GenerateToken("alice");
-        var result = generator.ValidateToken(token.AccessToken);
+        var first = new JsonWebToken(generator.GenerateToken(Alice).AccessToken).Id;
+        var second = new JsonWebToken(generator.GenerateToken(Alice).AccessToken).Id;
 
-        Assert.True(result.IsValid);
-        Assert.Null(result.Error);
+        Assert.NotEqual(first, second);
     }
 
     [Fact]
-    public void GenerateToken_PutsTheUsernameInTheToken()
+    public void CreateValidationParameters_ReadsTheShortClaimNamesWeWrite()
     {
-        var token = Create().GenerateToken("alice");
-        
-        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token.AccessToken);
+        var parameters = JwtTokenGenerator.CreateValidationParameters(Options());
 
-        Assert.Equal("alice", jwt.Claims.Single(claim => claim.Type == "name").Value);
-        Assert.Equal("Bearer", token.TokenType);
-        Assert.True(token.ExpiresAt > DateTime.UtcNow);
+        Assert.Equal(JwtRegisteredClaimNames.Name, parameters.NameClaimType);
+        Assert.Equal(JwtTokenGenerator.RoleClaimType, parameters.RoleClaimType);
     }
 
-    [Fact]
-    public void ValidateToken_RejectsAnExpiredToken()
+    private static JwtTokenGenerator Create(int expiryMinutes = 60) => new(new TestOptionsMonitor<JwtOptions>(Options(expiryMinutes)));
+
+    private static JwtOptions Options(int expiryMinutes = 60) => new()
     {
-        var generator = Create(expiryMinutes: -1);
-
-        var result = generator.ValidateToken(generator.GenerateToken("alice").AccessToken);
-
-        Assert.False(result.IsValid);
-        Assert.Equal("The token has expired.", result.Error);
-    }
-
-    [Fact]
-    public void ValidateToken_RejectsATokenThatWasEdited()
-    {
-        var generator = Create();
-        var token = generator.GenerateToken("alice").AccessToken;
-
-        var edited = token[..^1] + (token[^1] == 'A' ? 'B' : 'A');
-
-        var result = generator.ValidateToken(edited);
-
-        Assert.False(result.IsValid);
-        Assert.Equal("The signature is not valid - the token was altered.", result.Error);
-    }
-
-    [Fact]
-    public void ValidateToken_RejectsATokenSignedWithADifferentKey()
-    {
-        var theirToken = Create(key: OtherKey).GenerateToken("alice").AccessToken;
-
-        Assert.False(Create().ValidateToken(theirToken).IsValid);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("not-a-token")]
-    [InlineData("aaa.bbb.ccc")]
-    public void ValidateToken_RejectsRubbish(string token)
-    {
-        var result = Create().ValidateToken(token);
-
-        Assert.False(result.IsValid);
-        Assert.NotNull(result.Error);
-    }
-
-    private static JwtTokenGenerator Create(int expiryMinutes = 60, string key = Key) =>
-        new(new JwtOptions("test-issuer", "test-audience", key, expiryMinutes));
+        Issuer = "test-issuer",
+        Audience = "test-audience",
+        SecurityKey = Key,
+        ExpiryMinutes = expiryMinutes,
+    };
 }
