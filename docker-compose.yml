@@ -1,0 +1,26 @@
+services:
+  redis:
+    image: redis:8-alpine
+    container_name: api-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command:
+      - redis-server
+      # These keys are revoked tokens. Evicting one under memory pressure would
+      # silently make a logged-out token valid again, so refuse writes instead.
+      - --maxmemory-policy
+      - noeviction
+      # Throwaway development server, so no RDB snapshots and no append-only file.
+      # A real deployment wants persistence: losing the denylist un-revokes every
+      # token on it until each one reaches its own expiry.
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 2s
