@@ -1,19 +1,42 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
 namespace API.Authentication;
 
 public static class JwtBearerEventHandlers
 {
-    private const string LoggerCategory = "API.Authentication.JwtBearer";
+    public const string LoggerCategory = "API.Authentication.JwtBearer";
 
-    public static JwtBearerEvents Create() => new()
+    private const string FailureDetailKey = "auth:failure-detail";
+
+    public static JwtBearerEvents Create(ILogger logger) => new()
     {
+        OnTokenValidated = async context =>
+        {
+            var tokenId = context.Principal?.FindFirstValue(JwtRegisteredClaimNames.Jti);
+
+            if (string.IsNullOrEmpty(tokenId))
+            {
+                Reject(context.HttpContext, logger, "This token carries no 'jti', so it cannot be checked for revocation.");
+                context.Fail("Missing 'jti' claim.");
+
+                return;
+            }
+
+            var revoked = context.HttpContext.RequestServices.GetRequiredService<ITokenRevocationStore>();
+
+            if (await revoked.IsRevokedAsync(tokenId, context.HttpContext.RequestAborted))
+            {
+                Reject(context.HttpContext, logger, "This token has been revoked.");
+                context.Fail("Revoked token.");
+            }
+        },
+
         OnAuthenticationFailed = context =>
         {
-            var logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(LoggerCategory);
-
             if (context.Exception is SecurityTokenExpiredException)
             {
                 context.Response.Headers.Append("x-token-expired", "true");
@@ -39,7 +62,7 @@ public static class JwtBearerEventHandlers
             {
                 Status = StatusCodes.Status401Unauthorized,
                 Title = "Unauthorized",
-                Detail = context.ErrorDescription ?? "A valid bearer token is required.",
+                Detail = ChallengeDetail(context),
             });
         },
 
@@ -55,4 +78,21 @@ public static class JwtBearerEventHandlers
             });
         },
     };
+
+    private static string ChallengeDetail(JwtBearerChallengeContext context)
+    {
+        if (context.HttpContext.Items[FailureDetailKey] is string detail)
+        {
+            return detail;
+        }
+
+        return string.IsNullOrEmpty(context.ErrorDescription) ? "A valid bearer token is required." : context.ErrorDescription;
+    }
+
+    private static void Reject(HttpContext context, ILogger logger, string detail)
+    {
+        context.Items[FailureDetailKey] = detail;
+
+        logger.LogInformation("Bearer token rejected: {Reason}", detail);
+    }
 }
