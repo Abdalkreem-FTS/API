@@ -10,7 +10,7 @@ public class DistributedCacheTokenRevocationStoreTests
     [Fact]
     public async Task IsRevokedAsync_IsFalseForATokenNobodyRevoked()
     {
-        var store = Create();
+        var store = CreateStore();
 
         Assert.False(await store.IsRevokedAsync("some-jti"));
     }
@@ -18,7 +18,7 @@ public class DistributedCacheTokenRevocationStoreTests
     [Fact]
     public async Task RevokeAsync_RemembersALiveToken()
     {
-        var store = Create();
+        var store = CreateStore();
 
         await store.RevokeAsync("some-jti", DateTimeOffset.UtcNow.AddMinutes(15));
 
@@ -28,7 +28,7 @@ public class DistributedCacheTokenRevocationStoreTests
     [Fact]
     public async Task RevokeAsync_DoesNotStoreATokenThatHasAlreadyExpired()
     {
-        var store = Create();
+        var store = CreateStore();
 
         await store.RevokeAsync("some-jti", DateTimeOffset.UtcNow.AddMinutes(-1));
 
@@ -38,7 +38,7 @@ public class DistributedCacheTokenRevocationStoreTests
     [Fact]
     public async Task RevokeAsync_KeepsTokensApart()
     {
-        var store = Create();
+        var store = CreateStore();
 
         await store.RevokeAsync("first-jti", DateTimeOffset.UtcNow.AddMinutes(15));
 
@@ -46,6 +46,6 @@ public class DistributedCacheTokenRevocationStoreTests
         Assert.False(await store.IsRevokedAsync("second-jti"));
     }
 
-    private static DistributedCacheTokenRevocationStore Create() =>
+    private static DistributedCacheTokenRevocationStore CreateStore() =>
         new(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())));
 }
