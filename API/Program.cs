@@ -26,7 +26,13 @@ builder.Services.AddStackExchangeRedisCache(redis =>
     redis.InstanceName = "api:";
 });
 
-builder.Services.AddSingleton<ITokenRevocationStore, DistributedCacheTokenRevocationStore>();
+var revocation = builder.Configuration.GetValue("TokenRevocation:Strategy", TokenRevocationStrategy.Denylist);
+
+builder.Services.AddSingleton(typeof(ITokenRevocationStore), revocation switch
+{
+    TokenRevocationStrategy.Allowlist => typeof(AllowlistTokenRevocationStore),
+    _ => typeof(DenylistTokenRevocationStore),
+});
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -56,11 +62,24 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
 var api = app.MapGroup("/api");
 
-api.MapPost("/tokens", (LoginRequest request, JwtTokenGenerator tokens) =>
+api.MapPost("/tokens", async (
+    LoginRequest request,
+    JwtTokenGenerator tokens,
+    ITokenRevocationStore revoked,
+    CancellationToken cancellationToken) =>
 {
     var user = Users.Find(request.Username, request.Password);
 
-    return user is null ? Results.Unauthorized() : Results.Ok(tokens.GenerateToken(user));
+    if (user is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var (tokenId, response) = tokens.GenerateToken(user);
+
+    await revoked.IssueAsync(tokenId, response.ExpiresAt, cancellationToken);
+
+    return Results.Ok(response);
 });
 
 api.MapDelete("/tokens", async (

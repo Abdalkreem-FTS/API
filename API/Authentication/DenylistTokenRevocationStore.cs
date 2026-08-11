@@ -2,11 +2,15 @@ using Microsoft.Extensions.Caching.Distributed;
 
 namespace API.Authentication;
 
-public sealed class DistributedCacheTokenRevocationStore(IDistributedCache cache) : ITokenRevocationStore
+// Blacklist
+public sealed class DenylistTokenRevocationStore(IDistributedCache cache) : ITokenRevocationStore
 {
     private static readonly TimeSpan ExpiryBuffer = TimeSpan.FromMinutes(1);
 
     private static readonly byte[] Revoked = [.. "1"u8];
+
+    public Task IssueAsync(string tokenId, DateTimeOffset expiresAt, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
 
     public Task RevokeAsync(string tokenId, DateTimeOffset expiresAt, CancellationToken cancellationToken = default)
     {
