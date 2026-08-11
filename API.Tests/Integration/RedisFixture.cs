@@ -1,3 +1,4 @@
+using API.Authentication;
 using StackExchange.Redis;
 using Testcontainers.Redis;
 
@@ -7,9 +8,14 @@ public sealed class RedisFixture : IAsyncLifetime
 {
     private readonly RedisContainer _container = new RedisBuilder("redis:8-alpine").Build();
 
-    public RedisApiFactory Factory { get; private set; } = null!;
+    private RedisApiFactory _denylist = null!;
+
+    private RedisApiFactory _allowlist = null!;
 
     public IConnectionMultiplexer Connection { get; private set; } = null!;
+
+    public RedisApiFactory FactoryFor(TokenRevocationStrategy strategy) =>
+        strategy is TokenRevocationStrategy.Allowlist ? _allowlist : _denylist;
 
     public async Task InitializeAsync()
     {
@@ -17,13 +23,16 @@ public sealed class RedisFixture : IAsyncLifetime
 
         var connectionString = _container.GetConnectionString();
 
-        Factory = new RedisApiFactory(connectionString);
+        _denylist = new RedisApiFactory(connectionString, TokenRevocationStrategy.Denylist);
+        _allowlist = new RedisApiFactory(connectionString, TokenRevocationStrategy.Allowlist);
+
         Connection = await ConnectionMultiplexer.ConnectAsync(connectionString);
     }
 
     public async Task DisposeAsync()
     {
-        await Factory.DisposeAsync();
+        await _denylist.DisposeAsync();
+        await _allowlist.DisposeAsync();
         await Connection.DisposeAsync();
         await _container.DisposeAsync();
     }
