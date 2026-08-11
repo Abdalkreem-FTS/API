@@ -2,4 +2,6 @@ bin/
 obj/
 .idea/
 
+BenchmarkDotNet.Artifacts/
+
 *.DotSettings.user
