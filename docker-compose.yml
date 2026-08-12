@@ -11,15 +11,49 @@ services:
       # silently make a logged-out token valid again, so refuse writes instead.
       - --maxmemory-policy
       - noeviction
-      # Throwaway development server, so no RDB snapshots and no append-only file.
-      # A real deployment wants persistence: losing the denylist un-revokes every
-      # token on it until each one reaches its own expiry.
+      # Unlimited by default. Set REDIS_MAXMEMORY (e.g. 64mb) to provoke the failure
+      # the allowlist reaches first: once Redis refuses writes, logins start failing,
+      # while the denylist instead fails to record logouts.
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-0}
+      # No RDB snapshots, but the append-only log is on, because a production
+      # deployment would run it and every SET has to pay for it. There is no volume
+      # mounted, so the log still dies with the container.
       - --save
       - ""
       - --appendonly
-      - "no"
+      - "yes"
+      - --appendfsync
+      - everysec
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 2s
+
+  # Sits between the API and Redis so the load tests can add the round-trip latency a
+  # managed instance in another availability zone would have. With no toxic configured
+  # it just forwards, so leaving it running costs nothing.
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    container_name: api-toxiproxy
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      # The admin API the load tests drive.
+      - "8474:8474"
+      # The proxied Redis the API connects to.
+      - "26379:26379"
+    command:
+      - -host=0.0.0.0
+      - -config=/config/proxies.json
+    volumes:
+      - ./toxiproxy.json:/config/proxies.json:ro
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
       interval: 5s
       timeout: 3s
       retries: 5
