@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <OutputType>Exe</OutputType>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="NBomber" Version="6.5.0" />
+        <PackageReference Include="NBomber.Http" Version="6.2.1" />
+        <PackageReference Include="StackExchange.Redis" Version="2.9.11" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- The preloader drives the real store implementations, so the keyspace it builds
+             has exactly the shape the API would have produced. -->
+        <ProjectReference Include="..\API\API.csproj" />
+    </ItemGroup>
+
+</Project>
