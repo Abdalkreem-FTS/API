@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Security.Claims;
+using API.Diagnostics;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -12,10 +14,36 @@ public static class JwtBearerEventHandlers
 
     private const string FailureDetailKey = "auth:failure-detail";
 
-    public static JwtBearerEvents Create(ILogger logger) => new()
+    /// <param name="timings">
+    /// Null unless diagnostics are on, in which case signature validation is timed separately from
+    /// the revocation lookup that follows it.
+    /// </param>
+    public static JwtBearerEvents Create(ILogger logger, RequestTimings? timings = null) => new()
     {
+        OnMessageReceived = context =>
+        {
+            if (timings is not null)
+            {
+                context.HttpContext.Items[RequestTimingsMiddleware.ValidateStartedKey] = Stopwatch.GetTimestamp();
+            }
+
+            return Task.CompletedTask;
+        },
+
         OnTokenValidated = async context =>
         {
+            // Stamped before the revocation lookup, so this covers header parsing and the signature
+            // check only.
+            if (timings is not null &&
+                context.HttpContext.Items[RequestTimingsMiddleware.ValidateStartedKey] is long started)
+            {
+                var elapsed = Stopwatch.GetElapsedTime(started);
+
+                context.HttpContext.Items[RequestTimingsMiddleware.ValidateKey] = elapsed;
+
+                timings.Record(RequestTimings.Validate, elapsed);
+            }
+
             var tokenId = context.Principal?.FindFirstValue(JwtRegisteredClaimNames.Jti);
 
             if (string.IsNullOrEmpty(tokenId))

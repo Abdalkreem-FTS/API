@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using API.Authentication;
 using API.Contracts;
+using API.Diagnostics;
 using API.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
@@ -28,11 +29,24 @@ builder.Services.AddStackExchangeRedisCache(redis =>
 
 var revocation = builder.Configuration.GetValue("TokenRevocation:Strategy", TokenRevocationStrategy.Denylist);
 
-builder.Services.AddSingleton(typeof(ITokenRevocationStore), revocation switch
+var storeType = revocation switch
 {
     TokenRevocationStrategy.Allowlist => typeof(AllowlistTokenRevocationStore),
     _ => typeof(DenylistTokenRevocationStore),
-});
+};
+
+// Load tests turn this on to get a per-stage breakdown of where a request's time goes. Left off,
+// nothing below is registered and the request path is unchanged.
+var diagnostics = builder.Configuration.DiagnosticsEnabled();
+
+if (diagnostics)
+{
+    builder.Services.AddRequestTimings(storeType);
+}
+else
+{
+    builder.Services.AddSingleton(typeof(ITokenRevocationStore), storeType);
+}
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -40,10 +54,13 @@ builder.Services
 
 builder.Services
     .AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
-    .Configure<IOptionsMonitor<JwtOptions>, ILoggerFactory>((bearer, jwt, loggers) =>
+    .Configure<IOptionsMonitor<JwtOptions>, ILoggerFactory, IServiceProvider>((bearer, jwt, loggers, provider) =>
     {
         bearer.TokenValidationParameters = JwtTokenGenerator.CreateValidationParameters(jwt.CurrentValue);
-        bearer.Events = JwtBearerEventHandlers.Create(loggers.CreateLogger(JwtBearerEventHandlers.LoggerCategory));
+
+        bearer.Events = JwtBearerEventHandlers.Create(
+            loggers.CreateLogger(JwtBearerEventHandlers.LoggerCategory),
+            diagnostics ? provider.GetRequiredService<RequestTimings>() : null);
     });
 
 builder.Services.AddAuthorization();
@@ -55,8 +72,19 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+if (diagnostics)
+{
+    // Before authentication, so the measured total covers the bearer handler too.
+    app.UseRequestTimings();
+}
+
 app.UseAuthentication();
 app.UseAuthorization();
+
+if (diagnostics)
+{
+    app.MapDiagnostics();
+}
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
