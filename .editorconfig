@@ -1,0 +1,82 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,http}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.cs]
+max_line_length = 140
+
+# Namespaces
+csharp_style_namespace_declarations = file_scoped:warning
+dotnet_style_namespace_match_folder = true:warning
+
+# 'this.' is noise
+dotnet_style_qualification_for_field = false:warning
+dotnet_style_qualification_for_property = false:warning
+dotnet_style_qualification_for_method = false:warning
+dotnet_style_qualification_for_event = false:warning
+
+# var
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = true:silent
+
+# Modern C# expression styles
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_prefer_braces = true:warning
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_style_prefer_range_operator = true:suggestion
+
+# Nullability / immutability
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:warning
+dotnet_style_readonly_field = true:warning
+
+# Unused code should be visible
+dotnet_diagnostic.IDE0005.severity = warning
+csharp_style_unused_value_expression_statement_preference = discard_variable:silent
+
+# Newlines
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+
+# Naming. More specific rules first: the first matching rule wins, so the
+# const and static-readonly rules have to precede the private-field one or
+# they get renamed to _camelCase too.
+dotnet_naming_rule.constants_are_pascal_case.symbols = constants
+dotnet_naming_rule.constants_are_pascal_case.style = pascal_case
+dotnet_naming_rule.constants_are_pascal_case.severity = warning
+
+dotnet_naming_rule.static_readonly_fields_are_pascal_case.symbols = static_readonly_fields
+dotnet_naming_rule.static_readonly_fields_are_pascal_case.style = pascal_case
+dotnet_naming_rule.static_readonly_fields_are_pascal_case.severity = warning
+
+dotnet_naming_rule.private_instance_fields_are_underscored.symbols = private_fields
+dotnet_naming_rule.private_instance_fields_are_underscored.style = underscore_prefix
+dotnet_naming_rule.private_instance_fields_are_underscored.severity = warning
+
+dotnet_naming_symbols.constants.applicable_kinds = field
+dotnet_naming_symbols.constants.required_modifiers = const
+
+dotnet_naming_symbols.static_readonly_fields.applicable_kinds = field
+dotnet_naming_symbols.static_readonly_fields.required_modifiers = static, readonly
+
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+
+dotnet_naming_style.underscore_prefix.required_prefix = _
+dotnet_naming_style.underscore_prefix.capitalization = camel_case
