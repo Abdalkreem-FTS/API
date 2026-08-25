@@ -3,5 +3,9 @@ obj/
 .idea/
 
 BenchmarkDotNet.Artifacts/
+LoadTestReports/
+
+# NBomber writes here when a run does not set its own report folder.
+reports/
 
 *.DotSettings.user

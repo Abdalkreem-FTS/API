@@ -1,97 +1,71 @@
-using API.Authentication;
 using BenchmarkDotNet.Attributes;
-using Microsoft.Extensions.Caching.StackExchangeRedis;
-using Microsoft.Extensions.Options;
 
 namespace API.Benchmarks;
 
+// One token at a time, which is what a single request costs.
 [MemoryDiagnoser]
 [ThreadingDiagnoser]
-public class TokenRevocationBenchmarks
+// [IterationSetup] has to know how many tokens the coming iteration will consume, so the
+// invocation count is pinned instead of being discovered by a pilot run. The unroll factor
+// of 1 keeps one invocation per loop step, so the count is exact.
+[InvocationCount(Invocations, 1)]
+[IterationCount(20)]
+public class TokenRevocationBenchmarks : TokenRevocationBenchmarkBase
 {
-    private const int Concurrency = 100;
+    // Sized so an iteration clears BenchmarkDotNet's 100ms recommendation. The Login row
+    // for the denylist cannot get there at any count, because it never leaves the process.
+    private const int Invocations = 1024;
 
-    private const string Connection = "localhost:6379";
+    private string[] _loggingIn = null!;
 
-    [Params(TokenRevocationStrategy.Denylist, TokenRevocationStrategy.Allowlist)]
-    public TokenRevocationStrategy Strategy { get; set; }
+    private string[] _stillLoggedIn = null!;
 
-    private RedisCache _cache = null!;
+    private string[] _loggingOut = null!;
 
-    private ITokenRevocationStore _store = null!;
-
-    private DateTimeOffset _expiresAt;
-
-    private string _loggingIn = null!;
-
-    private string _stillLoggedIn = null!;
-
-    private string _loggingOut = null!;
-
-    private string[] _loggingInTogether = null!;
-
-    private string[] _stillLoggedInTogether = null!;
-
-    private string[] _loggingOutTogether = null!;
+    private int _index;
 
     [GlobalSetup]
     public async Task SetupAsync()
     {
-        _cache = new RedisCache(Options.Create(new RedisCacheOptions
-        {
-            Configuration = Connection,
-            InstanceName = "benchmark:",
-        }));
+        await ConnectAsync();
 
-        _store = Strategy is TokenRevocationStrategy.Allowlist
-            ? new AllowlistTokenRevocationStore(_cache)
-            : new DenylistTokenRevocationStore(_cache);
+        // Reading is not destructive, so this pool is issued once and reused for the
+        // whole run.
+        _stillLoggedIn = NewTokenIds(Invocations);
 
-        _expiresAt = DateTimeOffset.UtcNow.AddHours(1);
-
-        _loggingIn = Guid.NewGuid().ToString();
-        _stillLoggedIn = Guid.NewGuid().ToString();
-        _loggingOut = Guid.NewGuid().ToString();
-
-        _loggingInTogether = NewTokenIds();
-        _stillLoggedInTogether = NewTokenIds();
-        _loggingOutTogether = NewTokenIds();
-
-        await _cache.GetAsync("warm-up");
-
-        await _store.IssueAsync(_stillLoggedIn, _expiresAt);
-        await _store.IssueAsync(_loggingOut, _expiresAt);
-
-        await Task.WhenAll(_stillLoggedInTogether.Select(Issue));
-        await Task.WhenAll(_loggingOutTogether.Select(Issue));
+        await Task.WhenAll(_stillLoggedIn.Select(IssueAsync));
     }
 
     [GlobalCleanup]
-    public void Cleanup() => _cache.Dispose();
+    public void Cleanup() => Disconnect();
+
+    [IterationSetup(Target = nameof(Login))]
+    public void PrepareLogin()
+    {
+        _loggingIn = NewTokenIds(Invocations);
+        _index = 0;
+    }
+
+    [IterationSetup(Target = nameof(CheckOnEveryRequest))]
+    public void PrepareCheck() => _index = 0;
+
+    [IterationSetup(Target = nameof(Logout))]
+    public void PrepareLogout()
+    {
+        _loggingOut = NewTokenIds(Invocations);
+        _index = 0;
+
+        // Each id has to be live before it is revoked. This is the step whose absence
+        // let the allowlist revoke keys that were already gone.
+        Task.WhenAll(_loggingOut.Select(IssueAsync)).GetAwaiter().GetResult();
+    }
 
     [Benchmark]
-    public Task Login() => Issue(_loggingIn);
+    public Task Login() => IssueAsync(_loggingIn[_index++]);
 
     [Benchmark]
-    public Task<bool> CheckOnEveryRequest() => _store.IsRevokedAsync(_stillLoggedIn);
+    public Task<bool> CheckOnEveryRequest() => Store.IsRevokedAsync(_stillLoggedIn[_index++]);
 
     [Benchmark]
-    public Task Logout() => Revoke(_loggingOut);
-
-    [Benchmark(OperationsPerInvoke = Concurrency)]
-    public Task LoginConcurrently() => Task.WhenAll(_loggingInTogether.Select(Issue));
-
-    [Benchmark(OperationsPerInvoke = Concurrency)]
-    public Task CheckOnEveryRequestConcurrently() =>
-        Task.WhenAll(_stillLoggedInTogether.Select(tokenId => _store.IsRevokedAsync(tokenId)));
-
-    [Benchmark(OperationsPerInvoke = Concurrency)]
-    public Task LogoutConcurrently() => Task.WhenAll(_loggingOutTogether.Select(Revoke));
-
-    private Task Issue(string tokenId) => _store.IssueAsync(tokenId, _expiresAt);
-
-    private Task Revoke(string tokenId) => _store.RevokeAsync(tokenId, _expiresAt);
-
-    private static string[] NewTokenIds() =>
-        [.. Enumerable.Range(0, Concurrency).Select(_ => Guid.NewGuid().ToString())];
+    public Task Logout() => RevokeAsync(_loggingOut[_index++]);
 }
