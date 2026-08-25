@@ -21,6 +21,9 @@ public sealed class StubTokenRevocationStore : ITokenRevocationStore
         }
     }
 
+    public Task IssueAsync(string tokenId, DateTimeOffset expiresAt, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
     public Task RevokeAsync(string tokenId, DateTimeOffset expiresAt, CancellationToken cancellationToken = default)
     {
         lock (_gate)

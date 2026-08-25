@@ -33,17 +33,18 @@ public sealed class JwtTokenGenerator(IOptionsMonitor<JwtOptions> options)
         RoleClaimType = RoleClaimType
     };
 
-    public TokenResponse GenerateToken(User user)
+    public (string TokenId, TokenResponse Response) GenerateToken(User user)
     {
         var jwt = options.CurrentValue;
 
         var issuedAt = DateTime.UtcNow;
         var expiresAt = issuedAt.AddMinutes(jwt.ExpiryMinutes);
+        var tokenId = Guid.NewGuid().ToString();
 
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new(JwtRegisteredClaimNames.Jti, tokenId),
             new(JwtRegisteredClaimNames.Name, user.Username)
         };
 
@@ -62,7 +63,7 @@ public sealed class JwtTokenGenerator(IOptionsMonitor<JwtOptions> options)
             SigningCredentials = new SigningCredentials(SigningKey(jwt), SecurityAlgorithms.HmacSha256),
         };
 
-        return new TokenResponse(Handler.CreateToken(descriptor), TokenType, expiresAt);
+        return (tokenId, new TokenResponse(Handler.CreateToken(descriptor), TokenType, expiresAt));
     }
 
     private static SymmetricSecurityKey SigningKey(JwtOptions options) => new(Encoding.UTF8.GetBytes(options.SecurityKey));

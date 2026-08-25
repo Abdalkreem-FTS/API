@@ -17,7 +17,7 @@ public class JwtTokenGeneratorTests
     [Fact]
     public void GenerateToken_WritesTheRegisteredClaims()
     {
-        var jwt = new JsonWebToken(Create().GenerateToken(Alice).AccessToken);
+        var jwt = new JsonWebToken(Create().GenerateToken(Alice).Response.AccessToken);
 
         Assert.Equal(Alice.Id.ToString(), jwt.Subject);
         Assert.NotEmpty(jwt.Id);
@@ -29,7 +29,7 @@ public class JwtTokenGeneratorTests
     [Fact]
     public void GenerateToken_WritesEveryRole()
     {
-        var jwt = new JsonWebToken(Create().GenerateToken(Alice).AccessToken);
+        var jwt = new JsonWebToken(Create().GenerateToken(Alice).Response.AccessToken);
 
         var roles = jwt.Claims
             .Where(claim => claim.Type == JwtTokenGenerator.RoleClaimType)
@@ -41,12 +41,12 @@ public class JwtTokenGeneratorTests
     [Fact]
     public void GenerateToken_WritesIssuedAtAndExpiry()
     {
-        var token = Create(expiryMinutes: 30).GenerateToken(Alice);
-        var jwt = new JsonWebToken(token.AccessToken);
+        var (_, response) = Create(expiryMinutes: 30).GenerateToken(Alice);
+        var jwt = new JsonWebToken(response.AccessToken);
 
         Assert.True(jwt.IssuedAt > DateTime.UtcNow.AddMinutes(-1));
-        Assert.True((token.ExpiresAt - jwt.ValidTo).Duration() < TimeSpan.FromSeconds(2));
-        Assert.True(token.ExpiresAt > DateTime.UtcNow.AddMinutes(29));
+        Assert.True((response.ExpiresAt - jwt.ValidTo).Duration() < TimeSpan.FromSeconds(2));
+        Assert.True(response.ExpiresAt > DateTime.UtcNow.AddMinutes(29));
     }
 
     [Fact]
@@ -54,10 +54,18 @@ public class JwtTokenGeneratorTests
     {
         var generator = Create();
 
-        var first = new JsonWebToken(generator.GenerateToken(Alice).AccessToken).Id;
-        var second = new JsonWebToken(generator.GenerateToken(Alice).AccessToken).Id;
+        var first = new JsonWebToken(generator.GenerateToken(Alice).Response.AccessToken).Id;
+        var second = new JsonWebToken(generator.GenerateToken(Alice).Response.AccessToken).Id;
 
         Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void GenerateToken_ReturnsTheJtiItWroteIntoTheToken()
+    {
+        var (tokenId, response) = Create().GenerateToken(Alice);
+
+        Assert.Equal(new JsonWebToken(response.AccessToken).Id, tokenId);
     }
 
     [Fact]

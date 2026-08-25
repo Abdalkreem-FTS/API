@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using API.Authentication;
 using API.Contracts;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -11,10 +12,17 @@ namespace API.Tests.Integration;
 [Trait("Category", "Integration")]
 public class TokenRevocationIntegrationTests(RedisFixture redis)
 {
-    [Fact]
-    public async Task LoggingOut_StopsTheTokenWorking()
+    public static TheoryData<TokenRevocationStrategy> Strategies =>
+    [
+        TokenRevocationStrategy.Denylist,
+        TokenRevocationStrategy.Allowlist,
+    ];
+
+    [Theory]
+    [MemberData(nameof(Strategies))]
+    public async Task LoggingOut_StopsTheTokenWorking(TokenRevocationStrategy strategy)
     {
-        var (client, _) = await AuthenticatedClientAsync();
+        var (client, _) = await AuthenticatedClientAsync(strategy);
 
         var before = await client.GetAsync("/api/weatherforecast");
         Assert.Equal(HttpStatusCode.OK, before.StatusCode);
@@ -26,10 +34,11 @@ public class TokenRevocationIntegrationTests(RedisFixture redis)
         Assert.Equal(HttpStatusCode.Unauthorized, after.StatusCode);
     }
 
-    [Fact]
-    public async Task LoggingOut_MakesTheRejectionSayItWasRevoked()
+    [Theory]
+    [MemberData(nameof(Strategies))]
+    public async Task LoggingOut_MakesTheRejectionSayItWasRevoked(TokenRevocationStrategy strategy)
     {
-        var (client, _) = await AuthenticatedClientAsync();
+        var (client, _) = await AuthenticatedClientAsync(strategy);
 
         await client.DeleteAsync("/api/tokens");
 
@@ -40,31 +49,34 @@ public class TokenRevocationIntegrationTests(RedisFixture redis)
         Assert.Equal("This token has been revoked.", problem.Detail);
     }
 
-    [Fact]
-    public async Task LoggingOut_LeavesTheUsersOtherTokensAlone()
+    [Theory]
+    [MemberData(nameof(Strategies))]
+    public async Task LoggingOut_LeavesTheUsersOtherTokensAlone(TokenRevocationStrategy strategy)
     {
-        var first = await LoginAsync();
-        var second = await LoginAsync();
+        var first = await LoginAsync(strategy);
+        var second = await LoginAsync(strategy);
 
-        await ClientWithToken(first.AccessToken).DeleteAsync("/api/tokens");
+        await ClientWithToken(strategy, first.AccessToken).DeleteAsync("/api/tokens");
 
-        var response = await ClientWithToken(second.AccessToken).GetAsync("/api/weatherforecast");
+        var response = await ClientWithToken(strategy, second.AccessToken).GetAsync("/api/weatherforecast");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    [Fact]
-    public async Task LoggingOut_WithoutAToken_Returns401()
+    [Theory]
+    [MemberData(nameof(Strategies))]
+    public async Task LoggingOut_WithoutAToken_Returns401(TokenRevocationStrategy strategy)
     {
-        var response = await redis.Factory.CreateClient().DeleteAsync("/api/tokens");
+        var response = await redis.FactoryFor(strategy).CreateClient().DeleteAsync("/api/tokens");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    [Fact]
-    public async Task LoggingOut_Twice_IsRejectedTheSecondTime()
+    [Theory]
+    [MemberData(nameof(Strategies))]
+    public async Task LoggingOut_Twice_IsRejectedTheSecondTime(TokenRevocationStrategy strategy)
     {
-        var (client, _) = await AuthenticatedClientAsync();
+        var (client, _) = await AuthenticatedClientAsync(strategy);
 
         await client.DeleteAsync("/api/tokens");
 
@@ -74,32 +86,84 @@ public class TokenRevocationIntegrationTests(RedisFixture redis)
     }
 
     [Fact]
-    public async Task LoggingOut_WritesTheJtiUnderTheConfiguredInstancePrefix()
+    public async Task LoggingIn_WritesNothingToTheDenylist()
     {
-        var (client, accessToken) = await AuthenticatedClientAsync();
+        var token = await LoginAsync(TokenRevocationStrategy.Denylist);
 
-        await client.DeleteAsync("/api/tokens");
-
-        var key = $"api:revoked-token:{new JsonWebToken(accessToken).Id}";
-
-        Assert.True(await redis.Connection.GetDatabase().KeyExistsAsync(key));
+        Assert.False(await KeyExistsAsync(DenylistKey(token)));
     }
 
     [Fact]
-    public async Task LoggingOut_SetsATtlThatOutlivesTheTokenAndNothingMore()
+    public async Task LoggingOut_WritesTheJtiToTheDenylist()
     {
-        var (client, accessToken) = await AuthenticatedClientAsync();
-        var jwt = new JsonWebToken(accessToken);
+        var (client, token) = await AuthenticatedClientAsync(TokenRevocationStrategy.Denylist);
 
         await client.DeleteAsync("/api/tokens");
 
-        var ttl = await redis.Connection
-            .GetDatabase()
-            .KeyTimeToLiveAsync($"api:revoked-token:{jwt.Id}");
+        Assert.True(await KeyExistsAsync(DenylistKey(token)));
+    }
+
+    [Fact]
+    public async Task LoggingOut_SetsADenylistTtlThatOutlivesTheTokenAndNothingMore()
+    {
+        var (client, token) = await AuthenticatedClientAsync(TokenRevocationStrategy.Denylist);
+
+        await client.DeleteAsync("/api/tokens");
+
+        await AssertTtlOutlivesTheTokenAsync(DenylistKey(token), token);
+    }
+
+    [Fact]
+    public async Task LoggingIn_WritesTheJtiToTheAllowlist()
+    {
+        var token = await LoginAsync(TokenRevocationStrategy.Allowlist);
+
+        Assert.True(await KeyExistsAsync(AllowlistKey(token)));
+    }
+
+    [Fact]
+    public async Task LoggingIn_SetsAnAllowlistTtlThatOutlivesTheTokenAndNothingMore()
+    {
+        var token = await LoginAsync(TokenRevocationStrategy.Allowlist);
+
+        await AssertTtlOutlivesTheTokenAsync(AllowlistKey(token), token);
+    }
+
+    [Fact]
+    public async Task LoggingOut_DeletesTheJtiFromTheAllowlist()
+    {
+        var (client, token) = await AuthenticatedClientAsync(TokenRevocationStrategy.Allowlist);
+
+        await client.DeleteAsync("/api/tokens");
+
+        Assert.False(await KeyExistsAsync(AllowlistKey(token)));
+    }
+
+    [Fact]
+    public async Task LosingTheAllowlistEntry_StopsTheTokenWorking()
+    {
+        var (client, token) = await AuthenticatedClientAsync(TokenRevocationStrategy.Allowlist);
+
+        await redis.Connection.GetDatabase().KeyDeleteAsync(AllowlistKey(token));
+
+        var response = await client.GetAsync("/api/weatherforecast");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    private static string DenylistKey(TokenResponse token) => $"api:revoked-token:{new JsonWebToken(token.AccessToken).Id}";
+
+    private static string AllowlistKey(TokenResponse token) => $"api:active-token:{new JsonWebToken(token.AccessToken).Id}";
+
+    private Task<bool> KeyExistsAsync(string key) => redis.Connection.GetDatabase().KeyExistsAsync(key);
+
+    private async Task AssertTtlOutlivesTheTokenAsync(string key, TokenResponse token)
+    {
+        var ttl = await redis.Connection.GetDatabase().KeyTimeToLiveAsync(key);
 
         Assert.NotNull(ttl);
 
-        var remaining = jwt.ValidTo - DateTime.UtcNow;
+        var remaining = new JsonWebToken(token.AccessToken).ValidTo - DateTime.UtcNow;
 
         Assert.InRange(
             ttl.Value,
@@ -107,9 +171,9 @@ public class TokenRevocationIntegrationTests(RedisFixture redis)
             remaining + TimeSpan.FromSeconds(70));
     }
 
-    private async Task<TokenResponse> LoginAsync()
+    private async Task<TokenResponse> LoginAsync(TokenRevocationStrategy strategy)
     {
-        var response = await redis.Factory
+        var response = await redis.FactoryFor(strategy)
             .CreateClient()
             .PostAsJsonAsync("/api/tokens", new LoginRequest("alice", "Password123!"));
 
@@ -118,19 +182,19 @@ public class TokenRevocationIntegrationTests(RedisFixture redis)
         return (await response.Content.ReadFromJsonAsync<TokenResponse>())!;
     }
 
-    private HttpClient ClientWithToken(string accessToken)
+    private HttpClient ClientWithToken(TokenRevocationStrategy strategy, string accessToken)
     {
-        var client = redis.Factory.CreateClient();
+        var client = redis.FactoryFor(strategy).CreateClient();
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
         return client;
     }
 
-    private async Task<(HttpClient Client, string AccessToken)> AuthenticatedClientAsync()
+    private async Task<(HttpClient Client, TokenResponse Token)> AuthenticatedClientAsync(TokenRevocationStrategy strategy)
     {
-        var token = await LoginAsync();
+        var token = await LoginAsync(strategy);
 
-        return (ClientWithToken(token.AccessToken), token.AccessToken);
+        return (ClientWithToken(strategy, token.AccessToken), token);
     }
 }

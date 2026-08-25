@@ -5,12 +5,22 @@ using Microsoft.Extensions.Options;
 
 namespace API.Tests;
 
-public class DistributedCacheTokenRevocationStoreTests
+public class DenylistTokenRevocationStoreTests
 {
     [Fact]
     public async Task IsRevokedAsync_IsFalseForATokenNobodyRevoked()
     {
         var store = CreateStore();
+
+        Assert.False(await store.IsRevokedAsync("some-jti"));
+    }
+
+    [Fact]
+    public async Task IssueAsync_LeavesTheTokenValid()
+    {
+        var store = CreateStore();
+
+        await store.IssueAsync("some-jti", DateTimeOffset.UtcNow.AddMinutes(15));
 
         Assert.False(await store.IsRevokedAsync("some-jti"));
     }
@@ -46,6 +56,6 @@ public class DistributedCacheTokenRevocationStoreTests
         Assert.False(await store.IsRevokedAsync("second-jti"));
     }
 
-    private static DistributedCacheTokenRevocationStore CreateStore() =>
+    private static DenylistTokenRevocationStore CreateStore() =>
         new(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())));
 }
